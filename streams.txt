@@ -1,6 +1,7 @@
-# YouTube Live Streams - One per line
-# Use channel URLs (without /live) for best results
-
-https://www.youtube.com/@AriseNewsChannel
-https://www.youtube.com/@channelstv
-https://www.youtube.com/@NewsCentralTV
+# YouTube Live Streams - Using Video IDs (more reliable)
+# Arise News
+https://www.youtube.com/watch?v=x4wL-fWyhI0
+# Channels TV
+https://www.youtube.com/watch?v=W8nThq62Vb4
+# News Central TV
+https://www.youtube.com/watch?v=HblKKdGhxpo

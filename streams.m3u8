@@ -1,9 +1,18 @@
 #EXTM3U
 #EXT-X-VERSION:3
 # Auto-generated YouTube Live M3U8 Playlist
-# Generated: 2026-02-16 18:25 UTC
+# Generated: 2026-02-16 18:50 UTC
 
+
+#EXTINF:-1 tvg-id="AriseNewsChannel.yt" group-title="News",AriseNewsChannel (Error)
+# Failed to fetch info for: https://www.youtube.com/@AriseNewsChannel/live
+
+#EXTINF:-1 tvg-id="channelstv.yt" group-title="News",channelstv (Error)
+# Failed to fetch info for: https://www.youtube.com/@channelstv/live
+
+#EXTINF:-1 tvg-id="NewsCentralTV.yt" group-title="News",NewsCentralTV (Error)
+# Failed to fetch info for: https://www.youtube.com/@NewsCentralTV/live
 
 # Total streams: 3
 # Active live streams: 0
-# Last updated: 2026-02-16 18:25 UTC
+# Last updated: 2026-02-16 18:50 UTC

@@ -35,9 +35,9 @@ jobs:
           if [ ! -f "streams.txt" ]; then
             echo "Creating default streams.txt"
             echo "# YouTube Live Streams" > streams.txt
-            echo "https://www.youtube.com/@AriseNewsChannel" >> streams.txt
-            echo "https://www.youtube.com/@channelstv" >> streams.txt
-            echo "https://www.youtube.com/@NewsCentralTV" >> streams.txt
+            echo "https://www.youtube.com/@AriseNewsChannel/live" >> streams.txt
+            echo "https://www.youtube.com/@channelstv/live" >> streams.txt
+            echo "https://www.youtube.com/@NewsCentralTV/live" >> streams.txt
           fi
           echo "📄 streams.txt content:"
           cat streams.txt

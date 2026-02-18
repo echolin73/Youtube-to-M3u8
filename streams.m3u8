@@ -1,4 +1,15 @@
-# Use the main channel URLs without /live
-https://www.youtube.com/@AriseNewsChannel
-https://www.youtube.com/@channelstv
-https://www.youtube.com/@NewsCentralTV
+#EXTM3U
+# Generated: Wed Feb 18 17:01:59 UTC 2026
+
+
+#EXTINF:-1,AriseNewsChannel (Status Unknown - will retry)
+https://www.youtube.com/@AriseNewsChannel/live
+
+#EXTINF:-1,channelstv (Status Unknown - will retry)
+https://www.youtube.com/@channelstv/live
+
+#EXTINF:-1,NewsCentralTV (Status Unknown - will retry)
+https://www.youtube.com/@NewsCentralTV/live
+
+# Total streams: 3
+# Last updated: Wed Feb 18 17:02:07 UTC 2026

@@ -22,11 +22,24 @@ jobs:
 
       - name: Install yt-dlp and Deno
         run: |
+          # Update pip and install yt-dlp
+          pip install --upgrade pip
           pip install --upgrade yt-dlp
+          
+          # Install Deno properly
+          echo "📦 Installing Deno..."
           curl -fsSL https://deno.land/install.sh | sh
-          echo "/home/runner/.deno/bin" >> $GITHUB_PATH
+          
+          # Add Deno to PATH for this and all subsequent steps
+          DENO_PATH="/home/runner/.deno/bin"
+          echo "$DENO_PATH" >> $GITHUB_PATH
+          export PATH="$DENO_PATH:$PATH"
+          
+          # Verify installations
+          echo ""
           echo "✅ yt-dlp version: $(yt-dlp --version)"
           echo "✅ Deno version: $(deno --version | head -1)"
+          echo "✅ Deno location: $(which deno)"
 
       - name: Create cookies file
         env:
@@ -35,6 +48,7 @@ jobs:
           if [ -n "$COOKIES" ]; then
             echo "$COOKIES" > cookies.txt
             echo "✅ Cookies file created ($(wc -l < cookies.txt) lines)"
+            echo "First line: $(head -1 cookies.txt)"
           else
             echo "⚠️ No cookies secret found"
             exit 1
@@ -67,13 +81,15 @@ jobs:
             if [ -f "cookies.txt" ]; then
               echo "  🔑 Using cookies..."
               
-              VIDEO_ID=$(yt-dlp --cookies cookies.txt --get-id "$URL" 2>/dev/null)
+              # Get video ID with timeout
+              VIDEO_ID=$(yt-dlp --cookies cookies.txt --socket-timeout 15 --get-id "$URL" 2>/dev/null)
               
               if [ -n "$VIDEO_ID" ]; then
                 echo "  ✅ Got video ID: $VIDEO_ID"
                 
+                # Try formats in order of quality
                 for fmt in 301 300 best; do
-                  STREAM_URL=$(yt-dlp --cookies cookies.txt -f $fmt -g "https://youtube.com/watch?v=$VIDEO_ID" 2>/dev/null | head -1)
+                  STREAM_URL=$(yt-dlp --cookies cookies.txt --socket-timeout 15 -f $fmt -g "https://youtube.com/watch?v=$VIDEO_ID" 2>/dev/null | head -1)
                   if [ -n "$STREAM_URL" ]; then
                     echo "    ✅ Got format $fmt"
                     break
@@ -105,10 +121,18 @@ jobs:
           echo "# Summary: $ACTIVE/$TOTAL direct streams" >> streams.m3u8
           echo "# Updated: $(date -u)" >> streams.m3u8
           
+          # Clean up
           rm -f cookies.txt
           
           echo ""
           echo "📊 Summary: $ACTIVE/$TOTAL streams have direct URLs"
+
+      - name: Show playlist
+        run: |
+          echo ""
+          echo "📄 Generated streams.m3u8:"
+          echo "=========================="
+          cat streams.m3u8
 
       - name: Commit and push
         env:

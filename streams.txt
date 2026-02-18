@@ -1,9 +1,13 @@
-# YouTube Live Streams - Verified URLs
-# Arise News (Confirmed Working)
+#EXTM3U
+# Generated: [timestamp]
+
+#EXTINF:-1,AriseNewsChannel
 https://www.youtube.com/@AriseNewsChannel/live
 
-# Channels TV - Use the main channel URL (let YouTube/player redirect)
-https://www.youtube.com/@channelstv
+#EXTINF:-1,channelstv
+https://www.youtube.com/@channelstv/live
 
-# News Central TV - Use the main channel URL
-https://www.youtube.com/@NewsCentralTV
+#EXTINF:-1,NewsCentralTV
+https://www.youtube.com/@NewsCentralTV/live
+
+# Updated: [timestamp]

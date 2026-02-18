@@ -4,7 +4,7 @@ run-name: Generate playlist with cookies 🎬
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '0 */2 * * *'  # Run every 2 hours (reduced frequency)
   push:
     paths:
       - 'streams.txt'
@@ -41,74 +41,23 @@ jobs:
           echo "✅ Deno version: $(deno --version | head -1)"
           echo "✅ Deno location: $(which deno)"
 
-      - name: Diagnose secret before creating file
-        env:
-          COOKIES: ${{ secrets.COOKIES_TXT }}
-        run: |
-          echo "🔍 SECRET DIAGNOSTIC"
-          echo "===================="
-          
-          # Check if secret exists
-          if [ -n "$COOKIES" ]; then
-            echo "✅ Secret exists"
-            echo "📏 Secret length: ${#COOKIES} characters"
-            echo "📝 First 10 characters: ${COOKIES:0:10}"
-            echo "📝 Last 10 characters: ${COOKIES: -10}"
-            
-            # Check if it looks like a cookies file
-            if [[ "$COOKIES" == *".youtube.com"* ]]; then
-              echo "✅ Contains '.youtube.com' - looks like valid cookie format"
-            else
-              echo "⚠️ Does NOT contain '.youtube.com' - may be invalid format"
-            fi
-            
-            # Count lines (approximate)
-            LINE_COUNT=$(echo "$COOKIES" | wc -l)
-            echo "📊 Approximate lines: $LINE_COUNT"
-          else
-            echo "❌ Secret is empty or doesn't exist!"
-            exit 1
-          fi
-
       - name: Create cookies file
         env:
           COOKIES: ${{ secrets.COOKIES_TXT }}
         run: |
-          echo "$COOKIES" > cookies.txt
-          echo "✅ cookies.txt created"
-          echo "File size: $(wc -l < cookies.txt) lines"
-          echo "First line: $(head -1 cookies.txt)"
-          echo "Last line: $(tail -1 cookies.txt)"
+          if [ -n "$COOKIES" ]; then
+            echo "$COOKIES" > cookies.txt
+            echo "✅ Cookies file created ($(wc -l < cookies.txt) lines)"
+          else
+            echo "⚠️ No cookies secret found"
+            exit 1
+          fi
 
-      - name: Diagnose environment
-        run: |
-          echo "🔍 ENVIRONMENT DIAGNOSTIC"
-          echo "========================="
-          
-          echo "1. Checking Deno:"
-          which deno || echo "❌ Deno not found"
-          deno --version || echo "❌ Deno version failed"
-          
-          echo ""
-          echo "2. Checking cookies file:"
-          ls -la cookies.txt
-          echo "First 2 lines:"
-          head -2 cookies.txt
-          echo "Last 2 lines:"
-          tail -2 cookies.txt
-          
-          echo ""
-          echo "3. Testing yt-dlp with cookies:"
-          yt-dlp --cookies cookies.txt --dump-json --simulate "https://www.youtube.com/@AriseNewsChannel/live" 2>&1 || echo "❌ yt-dlp test failed"
-          
-          echo ""
-          echo "4. Checking PATH:"
-          echo $PATH
-
-      - name: Generate playlist
+      - name: Generate playlist with rate limit protection
         run: |
           echo "#EXTM3U" > streams.m3u8
           echo "# Generated: $(date -u)" >> streams.m3u8
+          echo "# Note: Added delays to avoid YouTube rate limiting" >> streams.m3u8
           echo "" >> streams.m3u8
 
           TOTAL=0
@@ -132,22 +81,37 @@ jobs:
             if [ -f "cookies.txt" ]; then
               echo "  🔑 Using cookies..."
               
+              # CRITICAL: Add random delay to avoid rate limiting
+              DELAY=$((RANDOM % 15 + 10))  # Random delay between 10-25 seconds
+              echo "  ⏱️ Rate limit protection: Waiting $DELAY seconds before request..."
+              sleep $DELAY
+              
               # Get video ID with timeout
-              VIDEO_ID=$(yt-dlp --cookies cookies.txt --socket-timeout 15 --get-id "$URL" 2>/dev/null)
+              echo "  🔍 Fetching video ID..."
+              VIDEO_ID=$(yt-dlp --cookies cookies.txt --socket-timeout 20 --get-id "$URL" 2>/dev/null)
               
               if [ -n "$VIDEO_ID" ]; then
                 echo "  ✅ Got video ID: $VIDEO_ID"
                 
+                # Add another small delay before format requests
+                sleep 3
+                
                 # Try formats in order of quality
                 for fmt in 301 300 best; do
-                  STREAM_URL=$(yt-dlp --cookies cookies.txt --socket-timeout 15 -f $fmt -g "https://youtube.com/watch?v=$VIDEO_ID" 2>/dev/null | head -1)
+                  echo "    Trying format $fmt..."
+                  STREAM_URL=$(yt-dlp --cookies cookies.txt --socket-timeout 20 -f $fmt -g "https://youtube.com/watch?v=$VIDEO_ID" 2>/dev/null | head -1)
                   if [ -n "$STREAM_URL" ]; then
                     echo "    ✅ Got format $fmt"
                     break
                   fi
+                  # Small delay between format attempts
+                  sleep 2
                 done
               else
-                echo "  ❌ Could not get video ID"
+                echo "  ❌ Could not get video ID - may be rate limited"
+                # If rate limited, wait longer before next attempt
+                echo "  ⏱️ Rate limit detected: Waiting 60 seconds..."
+                sleep 60
               fi
             fi
 
@@ -164,7 +128,11 @@ jobs:
               echo "$URL" >> streams.m3u8
             fi
 
-            sleep 1
+            # CRITICAL: Long delay between channels
+            if [ $TOTAL -lt 3 ]; then
+              echo "  ⏱️ Channel cooldown: Waiting 30 seconds before next channel..."
+              sleep 30
+            fi
 
           done < streams.txt
 
@@ -176,7 +144,8 @@ jobs:
           rm -f cookies.txt
           
           echo ""
-          echo "📊 Summary: $ACTIVE/$TOTAL streams have direct URLs"
+          echo "📊 FINAL SUMMARY: $ACTIVE/$TOTAL streams have direct URLs"
+          echo "✅ Playlist generation complete"
 
       - name: Show playlist
         run: |

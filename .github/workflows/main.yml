@@ -148,11 +148,11 @@ jobs:
           from datetime import datetime, timezone
 
           # ===== CONFIGURATION =====
-          # Your Cloudflare Worker proxy URL - CONFIRMED WORKING
+          # Your Cloudflare Worker proxy URL
           PROXY_BASE = "https://siteproxy.chidex4k43342.workers.dev/yourtube/"
           
-          # IMPORTANT: The trailing slash after the password is REQUIRED!
-          # Tested and working with curl 200 OK
+          # Note: This proxy needs to be updated to return actual video streams, not webpages
+          # For now, we'll keep it but you'll need to deploy a proper stream extractor
           # =========================
 
           def get_stream_url(url, cookies_file):
@@ -352,6 +352,15 @@ jobs:
           echo "=========================="
           head -20 streams.m3u8
           echo "..."
+
+      - name: Resolve git conflicts
+        run: |
+          echo "🔧 Removing git conflict markers from streams.m3u8..."
+          # Remove git conflict markers if they exist
+          sed -i '/^<<<<<<< /d' streams.m3u8 2>/dev/null || true
+          sed -i '/^=======/d' streams.m3u8 2>/dev/null || true
+          sed -i '/^>>>>>>> /d' streams.m3u8 2>/dev/null || true
+          echo "✅ Conflict markers removed"
 
       - name: Commit with conflict resolution
         env:

@@ -80,9 +80,8 @@ jobs:
           from datetime import datetime, timezone
 
           # ===== CONFIGURATION =====
-          # Your Cloudflare Worker URL - REPLACE WITH YOUR ACTUAL WORKER URL
-          WORKER_URL = "https://yt-proxy.your-worker.workers.dev"
-          # Format: /@HANDLE.m3u8 or /channel/CHANNEL_ID.m3u8
+          # Your Cloudflare Worker URL - WORKING!
+          WORKER_URL = "https://yt-proxy.chidex4k43342.workers.dev"
           PROXY_BASE = f"{WORKER_URL}/@"
           # =========================
 
@@ -189,9 +188,11 @@ jobs:
               time.sleep(random.randint(5, 10))
               stream_url, video_id = get_stream_url(line, 'cookies.txt')
               
-              # Extract channel name from URL
+              # Extract channel name from URL (remove @ and /live if present)
               name_match = re.search(r'@([^/]+)', line)
               channel_name = name_match.group(1) if name_match else f"Channel{i}"
+              # Clean up channel name (remove /live if present)
+              channel_name = channel_name.replace('/live', '')
               
               if stream_url and video_id:
                   active += 1

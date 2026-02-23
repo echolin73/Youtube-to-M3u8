@@ -1,5 +1,5 @@
 name: YouTube Live M3U8 Generator
-run-name: Generate HD Playlist with Cloudflare Worker 🎬
+run-name: Generate HD Playlist with Smart Quality Selection 🎬
 
 on:
   workflow_dispatch:
@@ -67,7 +67,7 @@ jobs:
           echo "$COOKIES" > cookies.txt
           echo "✅ Cookies loaded ($(wc -l < cookies.txt) lines)"
 
-      - name: Generate HD playlist with Cloudflare Worker
+      - name: Generate HD playlist with smart quality selection
         id: generate
         run: |
           cat > generate.py << 'PYTHON_EOF'
@@ -80,9 +80,8 @@ jobs:
           from datetime import datetime, timezone
 
           # ===== CONFIGURATION =====
-          # Your Cloudflare Worker URL - WORKING!
-          WORKER_URL = "https://yt-proxy.chidex4k43342.workers.dev"
-          PROXY_BASE = f"{WORKER_URL}/@"
+          # Your siteproxy Cloudflare Worker
+          PROXY_BASE = "https://siteproxy.chidex4k43342.workers.dev/yourtube/"
           # =========================
 
           def get_stream_url(url, cookies_file):
@@ -173,7 +172,6 @@ jobs:
               "#EXTM3U",
               f"# Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
               f"# Total channels: {len(lines)}",
-              f"# Proxy: Cloudflare Worker",
               ""
           ]
 
@@ -188,18 +186,14 @@ jobs:
               time.sleep(random.randint(5, 10))
               stream_url, video_id = get_stream_url(line, 'cookies.txt')
               
-              # Extract channel name from URL (remove @ and /live if present)
               name_match = re.search(r'@([^/]+)', line)
               channel_name = name_match.group(1) if name_match else f"Channel{i}"
-              # Clean up channel name (remove /live if present)
-              channel_name = channel_name.replace('/live', '')
               
-              if stream_url and video_id:
+              if stream_url:
                   active += 1
                   active_channels.append(channel_name)
                   
-                  # Determine quality
-                  if '1080' in stream_url:
+                  if '1080' in stream_url or 'height":1080' in str(stream_url):
                       quality_stats["1080p"] += 1
                       quality_tag = "1080p"
                   elif '720' in stream_url:
@@ -214,29 +208,30 @@ jobs:
                   
                   print(f"  ✅ SUCCESS: {quality_tag} stream")
                   
-                  # Create Cloudflare Worker URL using channel name
-                  proxied_url = PROXY_BASE + channel_name + ".m3u8"
+                  # Create proxied URL using siteproxy with video ID
+                  proxied_url = PROXY_BASE + video_id
                   
-                  m3u8.append(f'#EXTINF:-1 tvg-name="{channel_name}" group-title="NIGERIA",{channel_name} (Live - {quality_tag})')
+                  m3u8.append(f'#EXTINF:-1 tvg-name="{channel_name}" group-title="YouTube Live",{channel_name} (Live - {quality_tag})')
                   m3u8.append(proxied_url)
                   m3u8.append("")
               elif video_id:
-                  print(f"  ⚠️ Using fallback (no stream URL)")
+                  print(f"  ⚠️ Using proxied YouTube page")
                   offline_channels.append(channel_name)
-                  m3u8.append(f'#EXTINF:-1 tvg-name="{channel_name}" group-title="NIGERIA",{channel_name} (Offline)')
-                  m3u8.append(line)
+                  proxied_url = PROXY_BASE + f"https://www.youtube.com/watch?v={video_id}"
+                  m3u8.append(f'#EXTINF:-1 tvg-name="{channel_name}" group-title="YouTube Live",{channel_name} (Live - Proxy)')
+                  m3u8.append(proxied_url)
                   m3u8.append("")
               else:
-                  print(f"  ❌ Failed - channel unreachable")
+                  print(f"  ❌ Failed - using original URL")
                   offline_channels.append(channel_name)
-                  m3u8.append(f'#EXTINF:-1 tvg-name="{channel_name}" group-title="NIGERIA",{channel_name} (Error)')
+                  m3u8.append(f'#EXTINF:-1 tvg-name="{channel_name}" group-title="YouTube Live",{channel_name} (YouTube)')
                   m3u8.append(line)
                   m3u8.append("")
 
           m3u8.extend([
               "",
               f"# Summary: {active}/{len(lines)} streams active",
-              f"# Quality: 1080p:{quality_stats['1080p']} 720p:{quality_stats['720p']} 480p:{quality_stats['480p']}",
+              f"# Quality: {quality_stats['1080p']}x1080p, {quality_stats['720p']}x720p, {quality_stats['480p']}x480p",
               f"# Updated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
           ])
 
@@ -255,7 +250,7 @@ jobs:
 
           print(f"\n{'='*50}")
           print(f"📊 FINAL: {active}/{len(lines)} streams active")
-          print(f"📊 Quality: 1080p:{quality_stats['1080p']} 720p:{quality_stats['720p']} 480p:{quality_stats['480p']}")
+          print(f"📊 Quality breakdown: 1080p:{quality_stats['1080p']} 720p:{quality_stats['720p']} 480p:{quality_stats['480p']}")
           print(f"{'='*50}")
 
           PYTHON_EOF

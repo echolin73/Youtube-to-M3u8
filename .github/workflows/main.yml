@@ -4,7 +4,7 @@ run-name: Generate HD Playlist with Smart Quality Selection 🎬
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'  # Refresh every 6 hours (URLs expire ~6 hours)
+    - cron: '0 */6 * * *'  # Refresh every 6 hours
   push:
     paths:
       - 'streams.txt'
@@ -13,7 +13,6 @@ on:
 permissions:
   contents: write
 
-# Prevent concurrent runs
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -33,10 +32,11 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.WORKFLOW_PAT }}
 
-      - name: Setup Python & yt-dlp
+      - name: Setup Python, yt-dlp and Streamlink
         run: |
-          pip install --upgrade pip yt-dlp requests
+          pip install --upgrade pip yt-dlp streamlink requests
           echo "✅ yt-dlp: $(yt-dlp --version)"
+          echo "✅ Streamlink: $(streamlink --version | head -1)"
 
       - name: Setup Cloudflare WARP
         continue-on-error: true
@@ -67,11 +67,12 @@ jobs:
           echo "::add-mask::$(echo "$COOKIES" | head -1 | cut -f7)"
           echo "✅ Cookies loaded ($(wc -l < cookies.txt) lines)"
 
-      - name: Generate HD playlist with smart quality selection
+      - name: Generate Streamlink playlist (No Stutter)
         id: generate
         run: |
           cat > generate.py << 'PYTHON_EOF'
           import yt_dlp
+          import streamlink
           import time
           import random
           import re
@@ -79,16 +80,16 @@ jobs:
           import sys
           import requests
           from datetime import datetime, timezone
+          from urllib.parse import quote
 
-          def get_stream_url(url, cookies_file):
-              """Get the stream URL by prioritizing highest vertical resolution."""
+          def get_stream_info(url, cookies_file):
+              """Get video info using yt-dlp."""
               ydl_opts = {
                   'cookies': cookies_file,
                   'quiet': True,
                   'no_warnings': True,
                   'socket_timeout': 30,
                   'retries': 3,
-                  'fragment_retries': 3,
                   'extractor_args': {
                       'youtube': {
                           'player_client': ['web', 'android'],
@@ -112,61 +113,60 @@ jobs:
                       live_status = info.get('live_status', '')
                       
                       if not (is_live or live_status == 'is_live'):
-                          print(f"  ⚠️ Not currently live (status: {live_status})")
+                          print(f"  ⚠️ Not currently live")
                           return None, video_id, None
 
+                      # Get quality info from formats
                       formats = info.get('formats', [])
-                      
-                      # Filter for video formats with valid codecs
                       video_formats = [
                           f for f in formats 
-                          if f.get('height') and f.get('url') and f.get('vcodec') != 'none'
+                          if f.get('height') and f.get('vcodec') != 'none'
                       ]
                       
-                      if not video_formats:
-                          print("  ⚠️ No suitable video formats found.")
-                          return None, video_id, None
-
-                      # Sort by height descending, then fps descending
-                      video_formats.sort(key=lambda f: (f.get('height', 0), f.get('fps', 0)), reverse=True)
-                      
-                      # Select best available from priority list
-                      best_format = None
-                      target_heights = [1080, 720, 480]
-                      
-                      for target in target_heights:
-                          for fmt in video_formats:
-                              if fmt.get('height') == target:
-                                  best_format = fmt
-                                  break
-                          if best_format:
-                              break
-                      
-                      # Fallback to best available
-                      if not best_format:
-                          best_format = video_formats[0]
-
-                      if best_format:
-                          height = best_format.get('height', 'N/A')
-                          fps = best_format.get('fps', '')
-                          quality_tag = f"{height}p"
-                          if fps and fps > 30:
-                              quality_tag += f"{int(fps)}"
+                      if video_formats:
+                          best = max(video_formats, key=lambda x: (x.get('height', 0), x.get('fps', 0)))
+                          height = best.get('height', 0)
+                          fps = best.get('fps', 0)
                           
-                          print(f"  ✅ Selected: {quality_tag}")
+                          quality_tag = f"{height}p"
+                          if fps > 30:
+                              quality_tag += f"{int(fps)}"
                           
                           fmt_info = {
                               'height': height,
                               'quality_tag': quality_tag,
-                              'is_manifest': best_format.get('protocol') in ['m3u8_native', 'm3u8']
+                              'fps': fps
                           }
-                          
-                          return best_format['url'], video_id, fmt_info
-                      return None, video_id, None
+                      else:
+                          fmt_info = {'height': 0, 'quality_tag': 'Unknown', 'fps': 0}
+                      
+                      return video_id, title, fmt_info
                           
               except Exception as e:
                   print(f"  ⚠️ Error: {str(e)[:150]}")
                   return None, None, None
+
+          def test_streamlink(video_id):
+              """Test if Streamlink can handle this video."""
+              try:
+                  session = streamlink.Streamlink()
+                  # Set options to avoid throttling
+                  session.set_option('http-headers', {
+                      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                  })
+                  
+                  youtube_url = f"https://www.youtube.com/watch?v={video_id}"
+                  streams = session.streams(youtube_url)
+                  
+                  if streams:
+                      # Get best quality stream
+                      best = streams.get('best') or streams.get('1080p') or streams.get('720p') or list(streams.values())[0]
+                      return True, best.name
+                  return False, None
+                  
+              except Exception as e:
+                  print(f"  Streamlink test failed: {e}")
+                  return False, None
 
           # Read streams.txt
           if not os.path.exists('streams.txt'):
@@ -180,14 +180,19 @@ jobs:
               print("⚠️ No streams found")
               sys.exit(0)
 
-          # M3U8 Header with refresh directive (for players that support it)
+          # Generate M3U8 with Streamlink URLs
           m3u8 = [
               "#EXTM3U",
               "#EXT-X-VERSION:3",
-              f"#EXT-X-PLAYLIST-TYPE:EVENT",
               f"# Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
-              f"# Refresh: Every 6 hours via GitHub Actions",
+              f"# Playlist optimized for Streamlink (No Stutter)",
               f"# Total channels: {len(lines)}",
+              f"#",
+              f"# HOW TO USE:",
+              f"# 1. Install Streamlink: https://streamlink.github.io/install.html",
+              f"# 2. Play with: streamlink --player vlc 'URL' best",
+              f"# 3. Or use: streamlink --player mpv 'URL' best",
+              f"#",
               ""
           ]
 
@@ -196,57 +201,68 @@ jobs:
           active_channels = []
           offline_channels = []
           error_channels = []
+          streamlink_working = []
 
           for i, line in enumerate(lines, 1):
               print(f"\n📺 [{i}/{len(lines)}] Processing: {line}")
-              time.sleep(random.uniform(3, 8))
+              time.sleep(random.uniform(2, 5))
               
-              stream_url, video_id, fmt_info = get_stream_url(line, 'cookies.txt')
+              video_id, title, fmt_info = get_stream_info(line, 'cookies.txt')
               
-              # Extract and sanitize channel name
+              # Extract channel name
               name_match = re.search(r'@([^/]+)', line)
               channel_name = name_match.group(1) if name_match else f"Channel{i}"
               channel_name = re.sub(r'[^\w\s-]', '', channel_name).strip()
               
-              if stream_url and video_id and fmt_info:
-                  active += 1
-                  active_channels.append(channel_name)
-                  
+              if video_id and fmt_info:
                   height = fmt_info.get('height', 0)
-                  if height >= 1080:
-                      quality_stats["1080p"] += 1
-                  elif height >= 720:
-                      quality_stats["720p"] += 1
-                  elif height >= 480:
-                      quality_stats["480p"] += 1
+                  quality_tag = fmt_info.get('quality_tag', 'Unknown')
+                  
+                  # Test Streamlink compatibility
+                  print(f"  🧪 Testing Streamlink...")
+                  sl_ok, sl_quality = test_streamlink(video_id)
+                  
+                  if sl_ok:
+                      active += 1
+                      active_channels.append(channel_name)
+                      streamlink_working.append(channel_name)
+                      
+                      if height >= 1080:
+                          quality_stats["1080p"] += 1
+                      elif height >= 720:
+                          quality_stats["720p"] += 1
+                      elif height >= 480:
+                          quality_stats["480p"] += 1
+                      else:
+                          quality_stats["other"] += 1
+                      
+                      print(f"  ✅ Streamlink OK: {quality_tag}")
+                      
+                      # Streamlink-compatible URL format
+                      # Uses youtube.com URL with video ID - Streamlink handles the rest
+                      youtube_url = f"https://www.youtube.com/watch?v={video_id}"
+                      
+                      # Add special marker for Streamlink players
+                      m3u8.append(f'#EXTINF:-1 tvg-id="{video_id}" tvg-name="{channel_name}" group-title="YouTube Live",{channel_name} [{quality_tag}]')
+                      m3u8.append(f'{youtube_url}')
+                      m3u8.append("")
                   else:
-                      quality_stats["other"] += 1
-                  
-                  quality_tag = fmt_info.get('quality_tag', f"{height}p")
-                  is_manifest = fmt_info.get('is_manifest', False)
-                  
-                  print(f"  ✅ SUCCESS: {quality_tag} {'(HLS)' if is_manifest else '(MP4)'}")
-                  
-                  # USE DIRECT STREAM URL (expires in ~6 hours, refreshed by cron)
-                  # This is the most reliable method for YouTube live streams
-                  m3u8.append(f'#EXTINF:-1 tvg-id="{video_id}" tvg-name="{channel_name}" group-title="YouTube Live",{channel_name} [{quality_tag}]')
-                  m3u8.append(stream_url)
-                  m3u8.append("")
-                  
+                      print(f"  ⚠️ Streamlink failed, using fallback")
+                      offline_channels.append(channel_name)
+                      youtube_url = f"https://www.youtube.com/watch?v={video_id}"
+                      m3u8.append(f'#EXTINF:-1 tvg-id="{video_id}" tvg-name="{channel_name}" group-title="YouTube Live",{channel_name} [Fallback]')
+                      m3u8.append(youtube_url)
+                      m3u8.append("")
+                      
               elif video_id:
-                  # Channel has video ID but not currently live
-                  print(f"  ⚠️ Channel offline or restricted")
+                  print(f"  ⚠️ Channel offline")
                   offline_channels.append(channel_name)
-                  
-                  # Fallback to YouTube watch page
-                  fallback_url = f"https://www.youtube.com/watch?v={video_id}"
-                  
+                  youtube_url = f"https://www.youtube.com/watch?v={video_id}"
                   m3u8.append(f'#EXTINF:-1 tvg-id="{video_id}" tvg-name="{channel_name}" group-title="YouTube Live",{channel_name} [Offline]')
-                  m3u8.append(fallback_url)
+                  m3u8.append(youtube_url)
                   m3u8.append("")
               else:
-                  # Complete failure
-                  print(f"  ❌ Failed to extract any info")
+                  print(f"  ❌ Failed to extract")
                   error_channels.append(channel_name)
                   m3u8.append(f'#EXTINF:-1 tvg-name="{channel_name}" group-title="YouTube Live",{channel_name} [Error]')
                   m3u8.append(line)
@@ -256,16 +272,25 @@ jobs:
           m3u8.extend([
               "",
               f"# Summary: {active}/{len(lines)} streams active",
-              f"# Quality: {quality_stats['1080p']}x1080p, {quality_stats['720p']}x720p, {quality_stats['480p']}x480p, {quality_stats['other']}xOther",
-              f"# Offline: {len(offline_channels)}",
-              f"# Errors: {len(error_channels)}",
-              f"# Next refresh: {(datetime.now(timezone.utc) + __import__('datetime').timedelta(hours=6)).strftime('%Y-%m-%d %H:%M UTC')}",
+              f"# Streamlink compatible: {len(streamlink_working)}",
+              f"# Quality: {quality_stats['1080p']}x1080p, {quality_stats['720p']}x720p, {quality_stats['480p']}x480p",
               f"# Updated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
           ])
 
           # Write M3U8
           with open('streams.m3u8', 'w', encoding='utf-8') as f:
               f.write('\n'.join(m3u8))
+
+          # Also generate Streamlink command file
+          with open('streamlink_playlist.sh', 'w') as f:
+              f.write('#!/bin/bash\n')
+              f.write('# Streamlink playlist - Run: bash streamlink_playlist.sh\n\n')
+              for ch in streamlink_working:
+                  # Find video ID for this channel
+                  f.write(f'echo "Playing {ch}..."\n')
+                  f.write(f'streamlink --player vlc "https://www.youtube.com/@{ch}/live" best &\n')
+                  f.write('sleep 2\n')
+              f.write('wait\n')
 
           # Save stats
           with open('stats.txt', 'w') as f:
@@ -274,14 +299,15 @@ jobs:
               f.write(f"quality_1080p={quality_stats['1080p']}\n")
               f.write(f"quality_720p={quality_stats['720p']}\n")
               f.write(f"quality_480p={quality_stats['480p']}\n")
+              f.write(f"streamlink_working={len(streamlink_working)}\n")
               f.write(f"active_channels={','.join(active_channels)}\n")
               f.write(f"offline_channels={','.join(offline_channels)}\n")
               f.write(f"error_channels={','.join(error_channels)}\n")
 
           print(f"\n{'='*50}")
           print(f"📊 FINAL: {active}/{len(lines)} streams active")
+          print(f"📊 Streamlink compatible: {len(streamlink_working)}")
           print(f"📊 Quality: 1080p:{quality_stats['1080p']} 720p:{quality_stats['720p']} 480p:{quality_stats['480p']}")
-          print(f"⏰ URLs valid until: {(datetime.now(timezone.utc) + __import__('datetime').timedelta(hours=6)).strftime('%H:%M UTC')}")
           print(f"{'='*50}")
 
           PYTHON_EOF
@@ -297,34 +323,30 @@ jobs:
           echo "quality_1080p=$quality_1080p" >> $GITHUB_OUTPUT
           echo "quality_720p=$quality_720p" >> $GITHUB_OUTPUT
           echo "quality_480p=$quality_480p" >> $GITHUB_OUTPUT
+          echo "streamlink_working=$streamlink_working" >> $GITHUB_OUTPUT
           echo "active_channels=$active_channels" >> $GITHUB_OUTPUT
           echo "offline_channels=$offline_channels" >> $GITHUB_OUTPUT
           echo "error_channels=$error_channels" >> $GITHUB_OUTPUT
 
       - name: Validate and clean M3U8
         run: |
-          # Remove git conflict markers
           sed -i '/^<<<<<<< /d' streams.m3u8 2>/dev/null || true
           sed -i '/^=======/d' streams.m3u8 2>/dev/null || true
           sed -i '/^>>>>>>> /d' streams.m3u8 2>/dev/null || true
-          
-          # Remove duplicates
           awk '!seen[$0]++' streams.m3u8 > streams_clean.m3u8 2>/dev/null || true
           mv streams_clean.m3u8 streams.m3u8 2>/dev/null || true
           
-          # Validate
           if ! grep -q "^#EXTM3U" streams.m3u8; then
             echo "❌ Invalid M3U8"
             exit 1
           fi
-          
-          echo "✅ M3U8 validated ($(wc -l < streams.m3u8) lines)"
+          echo "✅ M3U8 validated"
 
-      - name: Show playlist preview (sanitized)
+      - name: Show playlist preview
         run: |
           echo "📄 Generated streams.m3u8:"
           echo "=========================="
-          head -25 streams.m3u8 | sed 's|https://[^[:space:]]*|[STREAM_URL]|g'
+          head -30 streams.m3u8
           echo "..."
 
       - name: Send Telegram Notification
@@ -337,35 +359,48 @@ jobs:
             📺 *YouTube Playlist Updated*
             
             ✅ *Active:* ${{ steps.stats.outputs.active }}/${{ steps.stats.outputs.total }}
-            📊 *Quality:* 1080p:${{ steps.stats.outputs.quality_1080p }} 720p:${{ steps.stats.outputs.quality_720p }} 480p:${{ steps.stats.outputs.quality_480p }}
+            🔧 *Streamlink Ready:* ${{ steps.stats.outputs.streamlink_working }}
             
-            📡 *Live:* ${{ steps.stats.outputs.active_channels }}
-            ⚫ *Offline:* ${{ steps.stats.outputs.offline_channels }}
+            📊 *Quality:*
+            • 1080p: ${{ steps.stats.outputs.quality_1080p }}
+            • 720p: ${{ steps.stats.outputs.quality_720p }}
+            • 480p: ${{ steps.stats.outputs.quality_480p }}
             
-            ⏰ *URLs valid for ~6 hours*
-            🔁 *Next refresh:* 6 hours
+            📡 *Channels:* ${{ steps.stats.outputs.active_channels }}
             
-            🔒 *Repository:* Private
-            🕐 *Updated:* $(date -u '+%H:%M UTC')
+            🎬 *HOW TO PLAY (No Stutter):*
+            ```bash
+            # Install Streamlink first:
+            # Windows: choco install streamlink
+            # macOS: brew install streamlink  
+            # Linux: sudo apt install streamlink
+            
+            # Play single channel:
+            streamlink --player vlc "https://www.youtube.com/watch?v=VIDEO_ID" best
+            
+            # Or use the playlist:
+            streamlink --player vlc "URL_FROM_M3U8" best
+            ```
+            
+            ⏰ *Refreshed:* $(date -u '+%H:%M UTC')
         continue-on-error: true
 
-      - name: Commit and push with retry
+      - name: Commit and push
         env:
           PAT_TOKEN: ${{ secrets.WORKFLOW_PAT }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          git add -f streams.m3u8 stats.txt
+          git add -f streams.m3u8 streamlink_playlist.sh stats.txt
           
           if git diff --cached --quiet; then
             echo "ℹ️ No changes"
             exit 0
           fi
           
-          git commit -m "🔄 Update playlist [$(date -u +%H:%M)] - ${{ steps.stats.outputs.active }}/${{ steps.stats.outputs.total }} active"
+          git commit -m "🔄 Update Streamlink playlist [$(date -u +%H:%M)] - ${{ steps.stats.outputs.active }}/${{ steps.stats.outputs.total }} active"
           
-          # Pull and push with retry
           MAX_RETRIES=5
           DELAY=10
           SUCCESS=false

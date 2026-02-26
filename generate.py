@@ -240,7 +240,7 @@ class YouTubePlaylistGenerator:
             return None
     
     def generate_individual_playlists(self, channels_data):
-        """Generate individual M3U8 files for each channel with validation"""
+        """Generate individual M3U8 files for each channel with validation and FIXED URL writing"""
         individual_channels = []
         
         for channel in channels_data:
@@ -269,7 +269,9 @@ class YouTubePlaylistGenerator:
                     # Add a note about URL expiration
                     expiry_time = (datetime.now() + timedelta(hours=5)).strftime('%H:%M UTC')
                     
+                    # FIXED: Write URL separately to prevent truncation
                     with open(filename, 'w', encoding='utf-8') as f:
+                        # Write the header and EXTINF line
                         f.write(f"""#EXTM3U
 #EXT-X-VERSION:3
 # Channel: {channel_name}
@@ -280,8 +282,11 @@ class YouTubePlaylistGenerator:
 # URL expires: ~{expiry_time} (refresh playlist if expired)
 
 #EXTINF:-1 tvg-id="{channel_id}"{logo_attr} tvg-name="{channel_name}" group-title="Individual",{channel_name} [{quality_tag}] 🔴 LIVE
-{main_stream['url']}
 """)
+                        # Write URL on its own line to prevent truncation
+                        f.write(main_stream['url'])
+                        f.write("\n")
+                    
                     print(f"  ✅ LIVE: {filename}")
                     
                     individual_channels.append({

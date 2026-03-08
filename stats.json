@@ -1,15 +1,71 @@
 {
-  "total": 0,
-  "live": 0,
+  "total": 10,
+  "live": 10,
   "offline": 0,
   "error": 0,
   "qualities": {
-    "1080p": 0,
-    "720p": 0,
+    "1080p": 6,
+    "720p": 4,
     "480p": 0,
     "other": 0
   },
-  "by_category": {},
-  "by_country": {},
-  "individual_channels": []
+  "by_category": {
+    "News": 4,
+    "General": 6
+  },
+  "by_country": {
+    "US": 10
+  },
+  "individual_channels": [
+    {
+      "name": "Arise News",
+      "file": "channels/arise_news.m3u8",
+      "quality": "1080p"
+    },
+    {
+      "name": "TVC News Nigeria",
+      "file": "channels/tvc_news_nigeria.m3u8",
+      "quality": "1080p"
+    },
+    {
+      "name": "Channels Television",
+      "file": "channels/channels_television.m3u8",
+      "quality": "720p"
+    },
+    {
+      "name": "News Central TV",
+      "file": "channels/news_central_tv.m3u8",
+      "quality": "1080p"
+    },
+    {
+      "name": "NTA Live",
+      "file": "channels/nta_live.m3u8",
+      "quality": "1080p"
+    },
+    {
+      "name": "Silverbird N24",
+      "file": "channels/silverbird_n24.m3u8",
+      "quality": "720p"
+    },
+    {
+      "name": "Voice of the People 903 FM",
+      "file": "channels/voice_of_the_people_903_fm.m3u8",
+      "quality": "720p"
+    },
+    {
+      "name": "Voice of the People TV",
+      "file": "channels/voice_of_the_people_tv.m3u8",
+      "quality": "720p"
+    },
+    {
+      "name": "JoyNews",
+      "file": "channels/joynews.m3u8",
+      "quality": "1080p"
+    },
+    {
+      "name": "Adom TV",
+      "file": "channels/adom_tv.m3u8",
+      "quality": "1080p"
+    }
+  ]
 }
